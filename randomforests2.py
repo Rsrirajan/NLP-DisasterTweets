@@ -105,3 +105,48 @@ for cls in unique_predicted_classes:
 
 predicted_report_df = pd.DataFrame.from_dict(predicted_report, orient='index')
 print("Refined Predicted Region Analysis:\n", predicted_report_df)
+
+
+final_dataset = pd.read_csv("tweets.csv")
+
+
+# Preprocess the `final_dataset`
+final_dataset['text'] = final_dataset['text'].fillna("").astype(str)
+
+# Identify rows where the 'location' is empty (NaN or null)
+empty_location_entries = final_dataset[final_dataset['location'].isnull()]
+
+# Vectorize the text data for empty location entries
+empty_location_tfidf = vectorizer.transform(empty_location_entries['text'])
+
+# Add sentiment features to the empty location entries
+empty_location_sentiment = empty_location_entries['text'].apply(extract_sentiment_features)
+empty_location_sentiment_matrix = sp.csr_matrix(empty_location_sentiment[['polarity', 'subjectivity']].values)
+
+# Generate KMeans cluster labels for the empty location entries
+empty_location_clusters = add_cluster_features(
+    empty_location_entries, num_clusters, empty_location_tfidf
+)
+empty_location_clusters_matrix = sp.csr_matrix(empty_location_clusters.reshape(-1, 1))
+
+# Combine TF-IDF, sentiment, and clustering features for prediction
+empty_location_features = sp.hstack([
+    empty_location_tfidf,
+    empty_location_sentiment_matrix,
+    empty_location_clusters_matrix
+])
+
+# Predict regions for entries with empty locations
+empty_location_entries['predicted_region'] = rf_model.predict(empty_location_features)
+
+# Save the empty entries before filling as `empty_tweets.xlsx`
+empty_location_entries.to_excel('empty_tweets.xlsx', index=False)
+
+# Fill the missing 'location' column with the predicted regions
+filled_dataset = final_dataset.copy()
+filled_dataset.loc[filled_dataset['location'].isnull(), 'location'] = empty_location_entries['predicted_region']
+
+# Save the dataset with filled locations as `filled_tweets.xlsx`
+filled_dataset.to_excel('filled_tweets.xlsx', index=False)
+
+print("Saved 'empty_tweets.xlsx' and 'filled_tweets.xlsx' with predictions.")
